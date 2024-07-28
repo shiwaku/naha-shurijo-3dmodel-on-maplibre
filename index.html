@@ -1,0 +1,215 @@
+<html>
+
+<head>
+  <title>首里城 3Dモデル（GLB）</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.css" rel="stylesheet">
+  <script src="https://unpkg.com/pmtiles@2.11.0/dist/index.js"></script>
+  <script src="https://unpkg.com/deck.gl@^8.9.0/dist.min.js"></script>
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+  <script type="text/javascript">
+    // addProtocolの設定
+    let protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', (request) => {
+      return new Promise((resolve, reject) => {
+        const callback = (err, data) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve({ data });
+          }
+        };
+        protocol.tile(request, callback);
+      });
+    });
+
+    // マップの初期化
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: 'skeleton.json',
+      hash: true,
+      zoom: 19.56,
+      center: [127.7196157, 26.2170256],
+      pitch: 78,
+      bearing: 73.6,
+      maxPitch: 85,
+      attributionControl: false,
+    })
+
+    // ズーム・回転
+    map.addControl(new maplibregl.NavigationControl());
+
+    // フルスクリーンモードのオンオフ
+    map.addControl(new maplibregl.FullscreenControl());
+
+    // 現在位置表示
+    map.addControl(new maplibregl.GeolocateControl({
+      positionOptions: {
+        enableHighAccuracy: false
+      },
+      fitBoundsOptions: { maxZoom: 18 },
+      trackUserLocation: true,
+      showUserLocation: true
+    }));
+
+    // スケール表示
+    map.addControl(new maplibregl.ScaleControl({
+      maxWidth: 200,
+      unit: 'metric'
+    }));
+
+    // Attributionを折りたたみ表示
+    map.addControl(
+      new maplibregl.AttributionControl({
+        compact: true,
+        customAttribution:
+          '<a href="https://sketchfab.com/3d-models/shuri-castle-shurijo-naha-okinawa-wip-45f901e4d6fa4192a6f329e35f2dc5b8" target="_blank">Shuri Castle / Shurijō, Naha - Okinawa .WIP</a> by <a href="https://sketchfab.com/RaizVR" target="_blank">Raiz</a> licensed under <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank">CC-BY-4.0</a>',
+      })
+    );
+
+    // 3D地形コントロール表示
+    map.addControl(
+      new maplibregl.TerrainControl({
+        source: 'gsi-terrain-rgb',
+        exaggeration: 1 // 標高を強調する倍率
+      })
+    );
+
+    // 環境光を作成
+    const ambientLight = new deck.AmbientLight({
+      color: [255, 255, 255],
+      intensity: 3.0
+    });
+
+    // 平行ライト作成
+    const directionalLight = new deck.DirectionalLight({
+      color: [255, 255, 255],
+      intensity: 9.0,
+      direction: [-3, -9, -1]
+    });
+
+    // ライティングエフェクトを作成
+    const lightingEffect = new deck.LightingEffect({ ambientLight, directionalLight });
+
+    const DATA_URL = d3.csv("data/position.csv");
+    const MODEL_URL = "data/shuri_castle__shurijo_naha_-_okinawa_.wip.glb";
+
+    map.on('load', () => {
+      // 標高タイルソース
+      map.addSource("gsidem-terrain-rgb", {
+        type: 'raster-dem',
+        tiles: [
+          'https://xs489works.xsrv.jp/raster-tiles/gsi/gsi-dem-terrain-rgb/{z}/{x}/{y}.png',
+        ],
+        attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html#dem" target="_blank">地理院タイル(標高タイル)</a>',
+        tileSize: 256
+      });
+
+      // 標高タイルセット
+      map.setTerrain({ 'source': 'gsidem-terrain-rgb', 'exaggeration': 1 });
+
+      // MapboxOverlayを使ったインターリーブ
+      // 首里城3Dモデル
+      const overlay = new deck.MapboxOverlay({
+        interleaved: true,
+        layers: [
+          new deck.ScenegraphLayer({
+            id: "scenegraphLayer",
+            data: DATA_URL,
+            getPosition: d => {
+              const elevation = 135;
+              return [Number(d.longitude), Number(d.latitude), elevation];
+            },
+            getOrientation: d => [0, -93, 90],
+            scenegraph: MODEL_URL,
+            sizeScale: 1.35,
+            _lighting: 'pbr',
+            pickable: true,
+            opacity: 1,
+          })
+        ],
+        effects: [
+          lightingEffect
+        ]
+      });
+
+      map.addControl(overlay);
+
+      // PLATEAU建築物モデル（PMTiles）ソース
+      map.addSource("plateau-pmtiles", {
+        type: "vector",
+        url: "pmtiles://https://public-data.geolonia.com/mlit-plateau/PLATEAU_2022_LOD1.pmtiles",
+        minzoom: 16,
+        maxzoom: 16,
+        attribution: '<a href="https://www.geospatial.jp/ckan/dataset/plateau">3D都市モデルPLATEAU建築物モデルLOD1（国土交通省）</a>'
+      });
+
+      // PLATEAU建築物モデル（PMTiles）レイヤ
+      map.addLayer({
+        'id': 'plateau-pmtiles',
+        'source': 'plateau-pmtiles',
+        'source-layer': "PLATEAU",
+        "minzoom": 16,
+        "maxzoom": 23,
+        'type': 'fill-extrusion',
+        'paint': {
+          "fill-extrusion-color": '#FFFFFF',
+          "fill-extrusion-opacity": 1,
+          "fill-extrusion-height": ["get", "measuredHeight"]
+        },
+        'filter': [
+          'all',
+          ['==', ['get', 'city'], '沖縄県那覇市'],
+          ['!=', ['get', 'id'], 'bldg_70b9cff2-73f2-4239-b39e-d6d6fdd2ce44'],
+          ['!=', ['get', 'id'], 'bldg_09c7531b-9368-4e65-9006-362cdfecad4b'],
+          ['!=', ['get', 'id'], 'bldg_b8bac3e7-a86e-4631-9f96-01a615c155a8'],
+          ['!=', ['get', 'id'], 'bldg_c2ffce73-0094-4163-a083-1d665c8b4c19'],
+          ['!=', ['get', 'id'], 'bldg_dfc7fed8-33cc-465a-b142-5e99a4b623f0'],
+          ['!=', ['get', 'id'], 'bldg_ff4758ec-7fce-4848-a448-96d60c68615b'],
+          ['!=', ['get', 'id'], 'bldg_c1a8585a-e006-4ff8-a434-1a0c706798fc'],
+          ['!=', ['get', 'id'], 'bldg_650e9767-39d6-4f47-8fd2-e798ef6646a7'],
+          ['!=', ['get', 'id'], 'bldg_b5743866-f767-45f5-8dbc-389ba02337f9'],
+          ['!=', ['get', 'id'], 'bldg_2674765f-58e3-4bb7-8002-cf09dbb826cc'],
+          ['!=', ['get', 'id'], 'bldg_82e32961-f3dc-4c9b-8f9f-918fe71a51c0'],
+          ['!=', ['get', 'id'], 'bldg_ec7f6336-ce4b-45f5-82e2-3abf257c19e1'],
+          ['!=', ['get', 'id'], 'bldg_b0dcde8e-d620-48a0-8ca7-5b3657840b84'],
+          ['!=', ['get', 'id'], 'bldg_936cbc1e-c1d8-4714-8986-9eaa81139e88'],
+          ['!=', ['get', 'id'], 'bldg_f4c13421-ced3-4719-9dca-21186e575ffe']
+        ]
+      });
+
+      // Skyレイヤ
+      map.setSky({
+        "sky-color": "#199EF3",
+        "sky-horizon-blend": 0.7,
+        "horizon-color": "#f0f8ff",
+        "horizon-fog-blend": 0.8,
+        "fog-color": "#2c7fb8",
+        "fog-ground-blend": 0.9,
+        "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 12, 0]
+      });
+
+    })
+  </script>
+</body>
+
+</html>
